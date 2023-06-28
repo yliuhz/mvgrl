@@ -17,6 +17,10 @@ import traceback
 import argparse
 import random
 
+import logging
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')  # - %(name)s
+logger = logging.getLogger(__file__)
+
 # Borrowed from https://github.com/PetarV-/DGI
 class GCN(nn.Module):
     def __init__(self, in_ft, out_ft, bias=True):
@@ -208,10 +212,10 @@ def train(dataset, verbose=False, seed=None, hidden_size=512):
             bd = np.array(bd).reshape(batch_size, sample_size, sample_size)
             bf = np.array(bf).reshape(batch_size, sample_size, ft_size)
         except:
-            print(f"{np.array(ba).shape} {np.array(bd).shape} {np.array(bf).shape}")
-            print(traceback.format_exc())
+            logger.error(f"{np.array(ba).shape} {np.array(bd).shape} {np.array(bf).shape}")
+            logger.error(traceback.format_exc())
             # # or
-            # print(sys.exc_info()[2])
+            # logger.error(sys.exc_info()[2])
 
         if sparse:
             ba = sparse_mx_to_torch_sparse_tensor(sp.coo_matrix(ba))
@@ -241,7 +245,7 @@ def train(dataset, verbose=False, seed=None, hidden_size=512):
         optimiser.step()
 
         if verbose:
-            print('Epoch: {0}, Loss: {1:0.4f}'.format(epoch, loss.item()))
+            logger.info('Epoch: {0}, Loss: {1:0.4f}'.format(epoch, loss.item()))
 
         if loss < best:
             best = loss
@@ -253,23 +257,16 @@ def train(dataset, verbose=False, seed=None, hidden_size=512):
 
         if cnt_wait == patience:
             if verbose:
-                print('Early stopping!')
+                logger.info('Early stopping!')
             break
 
     if verbose:
-        print('Loading {}th epoch'.format(best_t))
+        logger.info('Loading {}th epoch'.format(best_t))
     model.load_state_dict(torch.load('model.pkl'))
 
     if sparse:
         adj = sparse_mx_to_torch_sparse_tensor(sp.coo_matrix(adj))
         diff = sparse_mx_to_torch_sparse_tensor(sp.coo_matrix(diff))
-
-    with torch.no_grad():
-        # embeds, _ = model.embed(features, sp_adj if sparse else adj, sparse, None)
-        embeds, _ = model.embed(features, adj, diff, sparse, None)
-        emb = embeds[0, :].cpu().numpy()
-        os.makedirs("outputs", exist_ok=True)
-        np.savez(f"outputs/MVGRL_{dataset}_emb_{hid_units}_{seed}.npz", emb=emb, labels=labels.cpu().numpy())
 
     features = torch.FloatTensor(features[np.newaxis])
     adj = torch.FloatTensor(adj[np.newaxis])
@@ -277,6 +274,13 @@ def train(dataset, verbose=False, seed=None, hidden_size=512):
     features = features.cuda()
     adj = adj.cuda()
     diff = diff.cuda()
+
+    with torch.no_grad():
+        # embeds, _ = model.embed(features, sp_adj if sparse else adj, sparse, None)
+        embeds, _ = model.embed(features, adj, diff, sparse, None)
+        emb = embeds[0, :].cpu().numpy()
+        os.makedirs("outputs", exist_ok=True)
+        np.savez(f"outputs/MVGRL_{dataset}_emb_{hid_units}_{seed}.npz", emb=emb, labels=labels.cpu().numpy())
 
     embeds, _ = model.embed(features, adj, diff, sparse, None)
     train_embs = embeds[0, idx_train]
@@ -308,17 +312,17 @@ def train(dataset, verbose=False, seed=None, hidden_size=512):
         accs.append(acc * 100)
 
     accs = torch.stack(accs)
-    print(accs.mean().item(), accs.std().item())
+    logger.info(f"{accs.mean().item()}, {accs.std().item()}")
 
 
 if __name__ == '__main__':
-    setproctitle.setproctitle("MVGRL")
 
     parser = argparse.ArgumentParser()
     parser.add_argument("--nexp", type=int, default=3)
     parser.add_argument("--gpu", type=int, default=0)
     # parser.add_argument("--hidden_size", type=int, default=512)
     args = parser.parse_args()
+    logger.info(args)
 
     import warnings
     warnings.filterwarnings("ignore")
@@ -334,4 +338,6 @@ if __name__ == '__main__':
         random.seed(seed)
 
         for hidden_size in hidden_sizes:
+            setproctitle.setproctitle(f"MVGRL#{seed}#{hidden_size}")
+
             train(dataset, verbose=True, seed=seed, hidden_size=hidden_size)
