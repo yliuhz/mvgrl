@@ -1,4 +1,4 @@
-from dgl.data import CoraDataset, CitationGraphDataset
+from dgl.data import CoraGraphDataset, CitationGraphDataset
 from utils import preprocess_features, normalize_adj
 from sklearn.preprocessing import MinMaxScaler
 from utils import compute_ppr
@@ -10,7 +10,7 @@ import os
 
 def download(dataset):
     if dataset == 'cora':
-        return CoraDataset()
+        return CoraGraphDataset()
     elif dataset == 'citeseer' or 'pubmed':
         return CitationGraphDataset(name=dataset)
     else:

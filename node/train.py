@@ -1,3 +1,9 @@
+import os
+import sys
+sys.path.insert(0, ".")
+sys.path.append("..")
+sys.path.append(".")
+
 import numpy as np
 import scipy.sparse as sp
 import torch
@@ -5,6 +11,11 @@ import torch.nn as nn
 from utils import sparse_mx_to_torch_sparse_tensor
 from node.dataset import load
 
+import setproctitle
+import traceback
+
+import argparse
+import random
 
 # Borrowed from https://github.com/PetarV-/DGI
 class GCN(nn.Module):
@@ -141,13 +152,14 @@ class LogReg(nn.Module):
         return ret
 
 
-def train(dataset, verbose=False):
+def train(dataset, verbose=False, seed=None, hidden_size=512):
 
     nb_epochs = 3000
     patience = 20
     lr = 0.001
     l2_coef = 0.0
-    hid_units = 512
+    # hid_units = 512
+    hid_units = hidden_size
     sparse = False
 
     adj, diff, features, labels, idx_train, idx_val, idx_test = load(dataset)
@@ -191,9 +203,15 @@ def train(dataset, verbose=False):
             bd.append(diff[i: i + sample_size, i: i + sample_size])
             bf.append(features[i: i + sample_size])
 
-        ba = np.array(ba).reshape(batch_size, sample_size, sample_size)
-        bd = np.array(bd).reshape(batch_size, sample_size, sample_size)
-        bf = np.array(bf).reshape(batch_size, sample_size, ft_size)
+        try:
+            ba = np.array(ba).reshape(batch_size, sample_size, sample_size)
+            bd = np.array(bd).reshape(batch_size, sample_size, sample_size)
+            bf = np.array(bf).reshape(batch_size, sample_size, ft_size)
+        except:
+            print(f"{np.array(ba).shape} {np.array(bd).shape} {np.array(bf).shape}")
+            print(traceback.format_exc())
+            # # or
+            # print(sys.exc_info()[2])
 
         if sparse:
             ba = sparse_mx_to_torch_sparse_tensor(sp.coo_matrix(ba))
@@ -246,6 +264,13 @@ def train(dataset, verbose=False):
         adj = sparse_mx_to_torch_sparse_tensor(sp.coo_matrix(adj))
         diff = sparse_mx_to_torch_sparse_tensor(sp.coo_matrix(diff))
 
+    with torch.no_grad():
+        # embeds, _ = model.embed(features, sp_adj if sparse else adj, sparse, None)
+        embeds, _ = model.embed(features, adj, diff, sparse, None)
+        emb = embeds[0, :].cpu().numpy()
+        os.makedirs("outputs", exist_ok=True)
+        np.savez(f"outputs/MVGRL_{dataset}_emb_{hid_units}_{seed}.npz", emb=emb, labels=labels.cpu().numpy())
+
     features = torch.FloatTensor(features[np.newaxis])
     adj = torch.FloatTensor(adj[np.newaxis])
     diff = torch.FloatTensor(diff[np.newaxis])
@@ -287,11 +312,26 @@ def train(dataset, verbose=False):
 
 
 if __name__ == '__main__':
+    setproctitle.setproctitle("MVGRL")
+
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--nexp", type=int, default=3)
+    parser.add_argument("--gpu", type=int, default=0)
+    # parser.add_argument("--hidden_size", type=int, default=512)
+    args = parser.parse_args()
+
     import warnings
     warnings.filterwarnings("ignore")
-    torch.cuda.set_device(3)
+    torch.cuda.set_device(args.gpu)
 
     # 'cora', 'citeseer', 'pubmed'
     dataset = 'cora'
-    for __ in range(50):
-        train(dataset)
+    hidden_sizes = [512, 256, 128]
+    for seed in range(args.nexp):
+        np.random.seed(seed)
+        torch.manual_seed(seed)
+        torch.cuda.manual_seed(seed)
+        random.seed(seed)
+
+        for hidden_size in hidden_sizes:
+            train(dataset, verbose=True, seed=seed, hidden_size=hidden_size)
